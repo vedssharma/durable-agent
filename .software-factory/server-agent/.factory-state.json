@@ -1,0 +1,14 @@
+{
+  "project": "server-agent",
+  "current_stage": "complete",
+  "stages": {
+    "analyst": { "status": "complete" },
+    "architect": { "status": "complete" },
+    "developer": { "status": "complete" },
+    "reviewer": { "status": "complete", "mode": "manual-self-review" },
+    "tester": { "status": "complete", "passed": 21 },
+    "integrator": { "status": "complete" }
+  },
+  "deployment": "not-started",
+  "live_integrations": "unverified"
+}
