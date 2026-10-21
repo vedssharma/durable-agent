@@ -5,6 +5,7 @@ import { createAdapters } from './adapters.ts';
 import { openAgent } from './agent.ts';
 import { Queue, Worker } from './queue.ts';
 import { createWebhookServer } from './server.ts';
+import { startTelegramPolling } from './telegram-polling.ts';
 
 async function main() {
   process.umask(0o077);
@@ -36,11 +37,16 @@ async function main() {
       await adapter.send(message);
     });
     worker.start();
+    const telegram = byChannel.get('telegram');
+    const polling = telegram && process.env.TELEGRAM_MODE === 'polling'
+      ? startTelegramPolling(telegram, queue, process.env.TELEGRAM_BOT_TOKEN!.trim(), process.env.TELEGRAM_WEBHOOK_SECRET!.trim())
+      : undefined;
     console.log(JSON.stringify({ event: 'ready', port, channels: adapters.map(a => a.channel) }));
     let stopping = false;
     const stop = async () => {
       if (stopping) return;
       stopping = true;
+      await polling?.stop();
       const closed = new Promise<void>(resolve => server.close(() => resolve()));
       server.closeIdleConnections();
       const deadline = setTimeout(() => server.closeAllConnections(), 5000);
@@ -68,6 +74,13 @@ async function main() {
 void main().catch(error => {
   // Config errors contain variable names only; third-party exceptions may carry credentials.
   console.error('Startup failed. Check channel credentials, model, data directory lock, and port.');
-  if (error instanceof Error && /^(\w+ is required|Configure at least|Model not found|A channel with pending|Invalid PORT)/.test(error.message)) console.error(error.message);
+  const code = error instanceof Error && 'code' in error ? error.code : undefined;
+  if (code === 'EADDRINUSE') {
+    console.error(`PORT ${Number(process.env.PORT ?? 3000)} is already in use. Set PORT in .env to a free port, or stop the other service.`);
+  } else if (code === 'EACCES') {
+    console.error('Permission denied. Check access to DATA_DIR and permission to bind PORT.');
+  } else if (code === 'ELOCKED') {
+    console.error('DATA_DIR is locked by another agent process. Stop it or use a different DATA_DIR.');
+  } else if (error instanceof Error && /^(\w+ is required|Configure at least|Model not found|A channel with pending|Invalid PORT|Invalid TELEGRAM_MODE)/.test(error.message)) console.error(error.message);
   process.exitCode = 1;
 });

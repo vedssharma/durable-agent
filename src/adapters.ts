@@ -43,6 +43,7 @@ export function createAdapters(env: NodeJS.ProcessEnv): Adapter[] {
   const adapters: Adapter[] = [];
   const enabled = (prefix: string) => Object.entries(env).some(([key, value]) => key.startsWith(`${prefix}_`) && value?.trim());
   if (enabled('TELEGRAM')) {
+    if (env.TELEGRAM_MODE && !['polling', 'webhook'].includes(env.TELEGRAM_MODE)) throw new Error('Invalid TELEGRAM_MODE: use polling or webhook');
     const token = required(env, 'TELEGRAM_BOT_TOKEN');
     const secret = required(env, 'TELEGRAM_WEBHOOK_SECRET');
     const allowed = allowlist(env, 'TELEGRAM');

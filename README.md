@@ -1,8 +1,8 @@
 # Durable channel agent
 
-A server-hosted, text-only personal assistant using **@earendil-works/pi-durable** and **OpenAI GPT-6.1 Sol** (`gpt-6.1-sol`, present in the pinned pi-ai catalog). Conversations and unfinished model work survive restarts. Telegram, Slack and WhatsApp use authenticated webhooks. iMessage uses the included **Mac bridge** running alongside Apple's Messages app.
+A server-hosted, text-only personal assistant using **@earendil-works/pi-durable** and **OpenAI GPT-6.1 Sol** (`gpt-6.1-sol`, present in the pinned pi-ai catalog). Conversations and unfinished model work survive restarts. Telegram supports local long polling or authenticated webhooks. Slack and WhatsApp use authenticated webhooks. iMessage uses the included **Mac bridge** running alongside Apple's Messages app.
 
-This is an initial implementation, not a running deployment. Live credentials, provider permissions and an HTTPS hostname are required. Model availability in your OpenAI account has not been verified.
+This is an initial implementation, not a running deployment. Live credentials and provider permissions are required. Webhook channels also require an HTTPS hostname; Telegram polling does not. Model availability in your OpenAI account has not been verified.
 
 ## Quick start
 
@@ -42,7 +42,11 @@ The example Docker setup is not yet tested against a live server. Run exactly on
 
 ### Telegram
 
-Create a bot with BotFather and fill in its three `.env` settings. Register your webhook with the Telegram Bot API's `setWebhook` operation using:
+Create a bot with BotFather and fill in its three `.env` settings.
+
+**Local use (no public URL):** set `TELEGRAM_MODE=polling` in `.env`, then restart with `npm start`. The agent fetches messages directly from Telegram, applies the same sender allowlist, and commits them to the durable queue before acknowledging them. Keep `TELEGRAM_WEBHOOK_SECRET` configured even in polling mode. Run only one polling process per bot. Polling does not remove an existing webhook; remove it explicitly with Telegram's `deleteWebhook` API if switching from webhooks. Look for `telegram_polling_started` in the logs. `telegram_poll_retry` indicates a connectivity/API error (HTTP 409 often means another poller is running).
+
+**Public deployment:** leave `TELEGRAM_MODE` empty or set it to `webhook`. Register your webhook with the Telegram Bot API's `setWebhook` operation using:
 
 - `url`: `https://agent.example.com/webhooks/telegram`
 - `secret_token`: the same `TELEGRAM_WEBHOOK_SECRET`

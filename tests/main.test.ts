@@ -25,13 +25,44 @@ test('service boots without model calls, locks storage, serves health and shuts 
     assert.ok(ready.includes('ready'));
     assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status, 200);
     const duplicate = start();
+    let diagnostic = '';
+    duplicate.stderr.on('data', data => { diagnostic += String(data); });
     const [code] = await once(duplicate, 'exit');
     assert.equal(code, 1);
+    assert.match(diagnostic, /DATA_DIR is locked by another agent process/);
     const exited = once(child, 'exit');
     child.kill('SIGTERM');
     assert.equal((await exited)[0], 0);
   } finally {
     child.kill('SIGKILL');
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('occupied port reports an actionable error without exposing credentials', { timeout: 15_000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'durable-port-'));
+  const occupied = createServer();
+  await new Promise<void>(resolve => occupied.listen(0, '127.0.0.1', resolve));
+  const port = (occupied.address() as AddressInfo).port;
+  const child = spawn(process.execPath, ['src/main.ts'], {
+    env: {
+      PATH: process.env.PATH, DATA_DIR: dir, PORT: String(port),
+      OPENAI_API_KEY: 'private-test-key', TELEGRAM_BOT_TOKEN: 'private-test-token',
+      TELEGRAM_WEBHOOK_SECRET: 'private-test-secret', TELEGRAM_ALLOWED_SENDERS: '42',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let diagnostic = '';
+  child.stderr.on('data', data => { diagnostic += String(data); });
+  try {
+    const [code] = await once(child, 'exit');
+    assert.equal(code, 1);
+    assert.ok(diagnostic.includes(`PORT ${port} is already in use`));
+    assert.match(diagnostic, /Set PORT in .env to a free port/);
+    assert.doesNotMatch(diagnostic, /private-test/);
+  } finally {
+    child.kill('SIGKILL');
+    await new Promise<void>(resolve => occupied.close(() => resolve()));
     await rm(dir, { recursive: true, force: true });
   }
 });
