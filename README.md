@@ -21,6 +21,14 @@ Set `TELEGRAM_BOT_TOKEN`, a random `TELEGRAM_WEBHOOK_SECRET`, and `TELEGRAM_ALLO
 
 Only the OpenAI API-key path is wired up; this service does not read your Pi CLI login. `MODEL_ID` defaults to `gpt-6.1-sol` and is validated against the pinned catalog. It configures newly created conversations; existing conversations retain their stored model.
 
+### Live web search
+
+The agent has a read-only `web_search` tool using OpenAI's Responses API with `gpt-4.1` and hosted web search. It uses the same `OPENAI_API_KEY`; no extra credentials or configuration are needed. Your OpenAI project must have access to that model and web search. Restart the service after updating; existing chats gain the tool on their next input without losing history or changing their stored model.
+
+Ask, for example, “Search the web for today's major AI announcements and link your sources.” The agent is instructed to search for time-sensitive facts, cite source URLs, and disclose failures rather than claim unverified information is current. It receives search summaries and source links, not arbitrary browser or website-action access. Web content is untrusted evidence, not instructions.
+
+Each search incurs additional OpenAI model/tool charges. Search queries are sent to OpenAI; the agent is instructed not to include private chat details or secrets, but this is not a hard data-loss-prevention boundary. Searches time out after 60 seconds. Interrupted searches can replay on recovery and incur another charge. Search usage is billed separately and is not included in the harness model-usage totals. Live provider access still requires verification with your credentials.
+
 ### Always-on Docker deployment
 
 ```sh
@@ -112,7 +120,7 @@ Authenticated webhook -> messages.sqlite inbox -> pi-durable agent.sqlite
 
 ## Security and operational boundaries
 
-- No shell, file, or arbitrary external-action tools are enabled. This version converses; it does not yet browse, schedule reminders or proactively execute tasks. Add action tools only with a deliberate permissions/approval model.
+- Only read-only public web search is enabled. No shell, file, arbitrary URL fetch, website actions, reminders or proactive task execution are available. Add action tools only with a deliberate permissions/approval model.
 - HTTPS and explicit sender allowlists are required. Group contexts are shared within each admitted group/thread, never with other groups or channels.
 - The service limits body size, request frequency and backlog, but it is not a complete billing quota system. Set OpenAI project spending/rate limits and monitor usage before exposing it publicly.
 - General operational logs omit message bodies and upstream exception details. Do not enable reverse-proxy request/header logging that captures credentials.
@@ -127,4 +135,4 @@ npm run check
 npm test
 ```
 
-Tests use Pi's faux provider and local SQLite; they do not spend model tokens or contact real messaging APIs. They exercise real pi-durable restart recovery/deduplication, queue recovery, conversation ordering/isolation, webhook authentication/filtering, outbound rejection handling and HTTP admission. Mac bridge tests also cover synthetic Messages schemas, durable forwarding/send recovery, reply deduplication and a synthetic native attributed-text archive (when built on macOS). Live provider/channel setup, macOS permissions/AppleScript delivery and Docker/server deployment still need end-to-end verification.
+Tests use Pi's faux provider, mocked web-search responses and local SQLite; they do not spend model tokens or contact real messaging/search APIs. Web tests cover source extraction, sanitized failures, cancellation, bounded output and upgrading existing conversations to durable tool calls. They exercise real pi-durable restart recovery/deduplication, queue recovery, conversation ordering/isolation, webhook authentication/filtering, outbound rejection handling and HTTP admission. Mac bridge tests also cover synthetic Messages schemas, durable forwarding/send recovery, reply deduplication and a synthetic native attributed-text archive (when built on macOS). Live provider/channel setup, macOS permissions/AppleScript delivery and Docker/server deployment still need end-to-end verification.

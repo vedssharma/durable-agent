@@ -7,18 +7,56 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { createModels, fauxProvider, fauxAssistantMessage, fauxText } from '@earendil-works/pi-ai';
-import { Harness, createRegistry } from '@earendil-works/pi-durable';
+import { createModels, fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
+import { Harness, createRegistry, defineExtension } from '@earendil-works/pi-durable';
+import type { ToolRegistration } from '@earendil-works/pi-durable';
+import { createWebSearchTool } from '../src/web.ts';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { createAgent } from '../src/agent.ts';
 
-async function open(file: string, tokensPerSecond?: number) {
+async function open(file: string, tokensPerSecond?: number, tools: ToolRegistration[] = []) {
   const faux = fauxProvider({ provider: 'openai', models: [{ id: 'test' }], tokensPerSecond });
   const models = createModels(); models.setProvider(faux.provider);
-  const harness = await Harness.open(await openNodeSqliteStorage(file), { models, registry: createRegistry() }, BACKGROUND_CONTEXT);
+  const registry = createRegistry();
+  registry.install(defineExtension({ name: 'web', tools }));
+  const harness = await Harness.open(await openNodeSqliteStorage(file), { models, registry }, BACKGROUND_CONTEXT);
   harness.resume();
-  return { faux, harness, agent: createAgent(harness, 'test') };
+  return { faux, harness, agent: createAgent(harness, 'test', tools) };
 }
+
+test('existing conversations gain web search after restart and execute durable tool calls', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'durable-web-'));
+  const file = join(dir, 'agent.sqlite');
+  let opened = await open(file);
+  let searches = 0;
+  try {
+    opened.faux.setResponses([fauxAssistantMessage('Before tools')]);
+    await opened.agent.answer('telegram/chat1', 'old', 'Hello');
+    await opened.agent.close();
+    const tool = createWebSearchTool({ apiKey: 'test', fetch: async () => {
+      searches++;
+      return Response.json({ status: 'completed', output: [{ type: 'message', content: [{
+        type: 'output_text', text: 'Fresh evidence', annotations: [{ type: 'url_citation', url: 'https://example.com/news' }],
+      }] }] });
+    } });
+    opened = await open(file, undefined, [tool]);
+    opened.faux.setResponses([
+      context => {
+        assert.ok(context.messages.some(message => message.role === 'system' && message.toolsAdded?.some(tool => tool.name === 'web_search')));
+        return fauxAssistantMessage([fauxToolCall('web_search', { query: 'latest news' })], { stopReason: 'toolUse' });
+      },
+      context => {
+        assert.match(JSON.stringify(context.messages), /Fresh evidence/);
+        assert.match(JSON.stringify(context.messages), /https:\/\/example.com\/news/);
+        return fauxAssistantMessage('Latest news: https://example.com/news');
+      },
+    ]);
+    assert.equal(await opened.agent.answer('telegram/chat1', 'new', 'What is the latest news?'), 'Latest news: https://example.com/news');
+    assert.equal(searches, 1);
+    await opened.agent.answer('telegram/chat1', 'new', 'What is the latest news?');
+    assert.equal(searches, 1, 'deduplicated submissions must not repeat billed searches');
+  } finally { await opened.agent.close(); await rm(dir, { recursive: true, force: true }); }
+});
 
 test('real pi-durable store reopens conversations and deduplicates submissions', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'durable-agent-'));
